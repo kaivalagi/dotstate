@@ -22,7 +22,12 @@ ratatui = "0.30"
 crossterm = "0.29"
 
 # Git operations
-git2 = { version = "0.20", features = ["vendored-openssl"] }
+# `unstable-sha256` enables experimental SHA-256 object-format support (libgit2
+# GIT_EXPERIMENTAL_SHA256, see issue #35). `https` routes SHA-256 hashing through
+# thread-safe vendored OpenSSL, since libgit2's builtin SHA-256 impl is not
+# thread-safe. NOTE: unstable-sha256 is ABI-breaking and may change without notice
+# across git2 minor versions — keep the version pinned.
+git2 = { version = "0.21", features = ["vendored-openssl", "unstable-sha256", "https"] }
 
 # Configuration
 toml = "1.0"

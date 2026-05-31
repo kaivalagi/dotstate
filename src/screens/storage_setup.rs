@@ -147,6 +147,11 @@ pub struct StorageSetupState {
     // Setup processing state
     pub step: StorageSetupStep,
     pub setup_data: Option<GitHubSetupData>,
+
+    // Experimental SHA-256 repo confirmation gate (issue #35).
+    // When Some, a confirm popup is shown; holds the (repo_path, profiles)
+    // to proceed with once the user accepts.
+    pub pending_sha256_repo: Option<(std::path::PathBuf, Vec<String>)>,
 }
 
 impl Default for StorageSetupState {
@@ -170,6 +175,7 @@ impl Default for StorageSetupState {
             is_editing_token: false,
             step: StorageSetupStep::Input,
             setup_data: None,
+            pending_sha256_repo: None,
         }
     }
 }
@@ -1203,11 +1209,70 @@ impl StorageSetupScreen {
                     .map(|m| m.profiles.iter().map(|p| p.name.clone()).collect())
                     .unwrap_or_default();
 
+                // If the repo uses the experimental SHA-256 object format, gate
+                // the setup behind a confirmation popup before committing (issue #35).
+                if validation.warning_message.is_some() {
+                    self.state.pending_sha256_repo = Some((expanded_path, profiles));
+                    return Ok(ScreenAction::Refresh);
+                }
+
                 Ok(ScreenAction::SaveLocalRepoConfig {
                     repo_path: expanded_path,
                     profiles,
                 })
             }
+        }
+    }
+
+    /// Render the experimental SHA-256 confirmation popup (issue #35).
+    fn render_sha256_confirm(&self, frame: &mut Frame, area: Rect, ctx: &RenderContext) {
+        use crate::widgets::{Dialog, DialogVariant};
+
+        let content = format!(
+            "{}\n\nDo you want to continue setting up this repository?",
+            crate::git::SHA256_EXPERIMENTAL_WARNING
+        );
+        let footer = format!(
+            "{}: Continue | {}: Cancel",
+            self.key_display(ctx, Action::Confirm),
+            self.key_display(ctx, Action::Cancel),
+        );
+
+        let dialog = Dialog::new("Experimental SHA-256 Repository", &content)
+            .width(60)
+            .height(40)
+            .min_width(48)
+            .variant(DialogVariant::Warning)
+            .dim_background(true)
+            .footer(&footer);
+        frame.render_widget(dialog, area);
+    }
+
+    /// Handle input while the SHA-256 confirmation popup is open (issue #35).
+    fn handle_sha256_confirm_event(&mut self, event: Event, ctx: &ScreenContext) -> ScreenAction {
+        match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                match ctx.config.keymap.get_action(key.code, key.modifiers) {
+                    Some(Action::Confirm) => {
+                        if let Some((repo_path, profiles)) = self.state.pending_sha256_repo.take() {
+                            ScreenAction::SaveLocalRepoConfig {
+                                repo_path,
+                                profiles,
+                            }
+                        } else {
+                            ScreenAction::Refresh
+                        }
+                    }
+                    Some(Action::Cancel | Action::Quit) => {
+                        self.state.pending_sha256_repo = None;
+                        ScreenAction::Refresh
+                    }
+                    _ => ScreenAction::None,
+                }
+            }
+            // Block background interaction while the modal is open.
+            Event::Mouse(_) => ScreenAction::None,
+            _ => ScreenAction::None,
         }
     }
 }
@@ -1301,10 +1366,21 @@ impl Screen for StorageSetupScreen {
             Footer::render(frame, footer_chunk, &footer_text)?;
         }
 
+        // Overlay: experimental SHA-256 confirmation gate (issue #35)
+        if self.state.pending_sha256_repo.is_some() {
+            self.render_sha256_confirm(frame, area, ctx);
+        }
+
         Ok(())
     }
 
     fn handle_event(&mut self, event: Event, ctx: &ScreenContext) -> Result<ScreenAction> {
+        // Modal: experimental SHA-256 confirmation gate (issue #35). Intercept
+        // all input while open so the choice is explicit and background is blocked.
+        if self.state.pending_sha256_repo.is_some() {
+            return Ok(self.handle_sha256_confirm_event(event, ctx));
+        }
+
         self.state.error_message = None;
 
         match event {
@@ -1322,6 +1398,11 @@ impl Screen for StorageSetupScreen {
     }
 
     fn is_input_focused(&self) -> bool {
+        // Modal confirm popup is open — keys are actions, not text input.
+        if self.state.pending_sha256_repo.is_some() {
+            return false;
+        }
+
         // Only return true when we're actually typing in a text input field
         if self.state.focus != StorageSetupFocus::Form {
             return false;

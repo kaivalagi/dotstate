@@ -200,6 +200,12 @@ impl GitManager {
         Ok(Self { repo })
     }
 
+    /// Detect the object format (SHA-1 vs experimental SHA-256) of this repo.
+    #[must_use]
+    pub fn object_format(&self) -> ObjectFormat {
+        detect_object_format(&self.repo)
+    }
+
     /// Get the working directory of the repository.
     ///
     /// Returns the repo workdir path, or an error if the repo is bare.
@@ -218,7 +224,7 @@ impl GitManager {
         remote
             .url()
             .map(String::from)
-            .ok_or_else(|| anyhow::anyhow!("Remote '{remote_name}' has no URL"))
+            .map_err(|_| anyhow::anyhow!("Remote '{remote_name}' has no URL"))
     }
 
     /// Ensure .gitignore exists with common patterns for frequently changing files
@@ -255,7 +261,8 @@ impl GitManager {
     fn ensure_main_branch(repo: &Repository) -> Result<()> {
         // Check if HEAD exists and what branch it points to
         if let Ok(head) = repo.head() {
-            if let Some(branch_name) = head.name().and_then(|n| n.strip_prefix("refs/heads/")) {
+            if let Some(branch_name) = head.name().ok().and_then(|n| n.strip_prefix("refs/heads/"))
+            {
                 if branch_name == "master" {
                     // Rename master to main
                     let master_ref = repo.find_reference("refs/heads/master")?;
@@ -1318,7 +1325,7 @@ impl GitManager {
 
         let current_url = remote
             .url()
-            .ok_or_else(|| anyhow::anyhow!("Remote '{remote_name}' has no URL"))?;
+            .map_err(|_| anyhow::anyhow!("Remote '{remote_name}' has no URL"))?;
 
         let new_url = if embed_credentials {
             if let Some(token) = token {
@@ -1371,7 +1378,7 @@ impl GitManager {
 
         let current_url = remote
             .url()
-            .ok_or_else(|| anyhow::anyhow!("Remote '{remote_name}' has no URL"))?;
+            .map_err(|_| anyhow::anyhow!("Remote '{remote_name}' has no URL"))?;
 
         // Build new URL with updated token
         let new_url = if current_url.starts_with("https://") {
@@ -1586,7 +1593,7 @@ impl GitManager {
     #[must_use]
     pub fn get_current_branch(&self) -> Option<String> {
         let head = self.repo.head().ok()?;
-        let name = head.name()?;
+        let name = head.name().ok()?;
         // Remove 'refs/heads/' prefix
         name.strip_prefix("refs/heads/")
             .map(std::string::ToString::to_string)
@@ -1609,7 +1616,7 @@ impl GitManager {
 
         let mut changed_files = Vec::new();
         for entry in statuses.iter() {
-            if let Some(path) = entry.path() {
+            if let Ok(path) = entry.path() {
                 let status = entry.status();
                 let prefix = if status.contains(git2::Status::WT_NEW) {
                     "A " // Added
@@ -1726,7 +1733,7 @@ impl GitManager {
 
         let actual_url = remote
             .url()
-            .ok_or_else(|| anyhow::anyhow!("Remote '{remote_name}' has no URL"))?;
+            .map_err(|_| anyhow::anyhow!("Remote '{remote_name}' has no URL"))?;
 
         // Normalize URLs for comparison (remove token, trailing .git)
         let normalize = |url: &str| -> String {
@@ -1945,6 +1952,48 @@ impl GitManager {
     }
 }
 
+/// Hash algorithm / object format a git repository was created with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectFormat {
+    /// The traditional (and default) SHA-1 object format.
+    Sha1,
+    /// The newer SHA-256 object format. Supported via experimental libgit2
+    /// features (`unstable-sha256`); not yet stable upstream.
+    Sha256,
+}
+
+impl ObjectFormat {
+    /// Whether this object format relies on experimental/unstable support.
+    #[must_use]
+    pub fn is_experimental(self) -> bool {
+        matches!(self, ObjectFormat::Sha256)
+    }
+}
+
+/// User-facing warning shown when a repository uses the SHA-256 object format.
+pub const SHA256_EXPERIMENTAL_WARNING: &str =
+    "This repository uses the SHA-256 object format. DotState supports it through \
+experimental libgit2 features — it works, but upstream support is not yet stable and \
+may change. Proceed with caution and keep backups.";
+
+/// Detect the object format of an opened git repository.
+///
+/// Reads the `extensions.objectformat` git config key. When the key is absent
+/// (the overwhelmingly common case) the repository uses SHA-1.
+#[must_use]
+pub fn detect_object_format(repo: &Repository) -> ObjectFormat {
+    let format = repo
+        .config()
+        .and_then(|mut cfg| cfg.snapshot())
+        .ok()
+        .and_then(|snap| snap.get_string("extensions.objectformat").ok());
+
+    match format.as_deref() {
+        Some(f) if f.eq_ignore_ascii_case("sha256") => ObjectFormat::Sha256,
+        _ => ObjectFormat::Sha1,
+    }
+}
+
 /// Validation result for local repository
 #[derive(Debug)]
 pub struct LocalRepoValidation {
@@ -1955,6 +2004,8 @@ pub struct LocalRepoValidation {
     pub has_origin: bool,
     pub remote_url: Option<String>,
     pub error_message: Option<String>,
+    /// Non-blocking warning (e.g. experimental SHA-256 object format).
+    pub warning_message: Option<String>,
 }
 
 /// Validate a local repository for use with `DotState`
@@ -1984,6 +2035,7 @@ pub fn validate_local_repo(path: &Path) -> LocalRepoValidation {
             has_origin: false,
             remote_url: None,
             error_message: Some(format!("Path does not exist: {}", expanded_path.display())),
+            warning_message: None,
         };
     }
 
@@ -1998,6 +2050,7 @@ pub fn validate_local_repo(path: &Path) -> LocalRepoValidation {
             error_message: Some(
                 "Not a git repository. Run 'git clone <url> <path>' first.".to_string(),
             ),
+            warning_message: None,
         };
     }
 
@@ -2011,13 +2064,14 @@ pub fn validate_local_repo(path: &Path) -> LocalRepoValidation {
                 has_origin: false,
                 remote_url: None,
                 error_message: Some(format!("Failed to open repository: {e}")),
+                warning_message: None,
             };
         }
     };
 
     // Check for origin remote
     let remote_url = match repo.find_remote("origin") {
-        Ok(remote) => remote.url().map(std::string::ToString::to_string),
+        Ok(remote) => remote.url().ok().map(std::string::ToString::to_string),
         Err(_) => {
             return LocalRepoValidation {
                 is_valid: false,
@@ -2028,8 +2082,17 @@ pub fn validate_local_repo(path: &Path) -> LocalRepoValidation {
                     "No 'origin' remote found. Run 'git remote add origin <url>' first."
                         .to_string(),
                 ),
+                warning_message: None,
             };
         }
+    };
+
+    // The repo is valid; surface a non-blocking warning if it uses the
+    // experimental SHA-256 object format (issue #35).
+    let warning_message = if detect_object_format(&repo).is_experimental() {
+        Some(SHA256_EXPERIMENTAL_WARNING.to_string())
+    } else {
+        None
     };
 
     LocalRepoValidation {
@@ -2038,6 +2101,7 @@ pub fn validate_local_repo(path: &Path) -> LocalRepoValidation {
         has_origin: true,
         remote_url,
         error_message: None,
+        warning_message,
     }
 }
 
@@ -2240,6 +2304,69 @@ mod tests {
             result.remote_url,
             Some("https://github.com/test/test.git".to_string())
         );
+    }
+
+    #[test]
+    fn test_detect_object_format_sha1() {
+        let temp_dir = TempDir::new().unwrap();
+        let git_mgr = GitManager::open_or_init(temp_dir.path()).unwrap();
+        assert_eq!(git_mgr.object_format(), ObjectFormat::Sha1);
+        assert!(!git_mgr.object_format().is_experimental());
+    }
+
+    #[test]
+    fn test_validate_local_repo_sha1_no_warning() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut git_mgr = GitManager::open_or_init(temp_dir.path()).unwrap();
+        git_mgr
+            .add_remote("origin", "https://github.com/test/test.git")
+            .unwrap();
+
+        let result = validate_local_repo(temp_dir.path());
+        assert!(result.is_valid);
+        assert!(result.warning_message.is_none());
+    }
+
+    #[test]
+    fn test_validate_local_repo_sha256_warning() {
+        use std::process::Command;
+
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create a SHA-256 repo via system git. Skip the test if this git
+        // build predates --object-format (git < 2.29) or rejects sha256.
+        let init = Command::new("git")
+            .args(["init", "--object-format=sha256"])
+            .current_dir(temp_dir.path())
+            .output();
+        let supported = matches!(init, Ok(ref o) if o.status.success());
+        if !supported {
+            eprintln!("skipping: system git lacks --object-format=sha256 support");
+            return;
+        }
+
+        // Add an origin remote so the repo passes validation.
+        let _ = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/test/test.git",
+            ])
+            .current_dir(temp_dir.path())
+            .output()
+            .unwrap();
+
+        // Detection helper sees SHA-256.
+        let git_mgr = GitManager::open_or_init(temp_dir.path()).unwrap();
+        assert_eq!(git_mgr.object_format(), ObjectFormat::Sha256);
+        assert!(git_mgr.object_format().is_experimental());
+
+        // Validation reports the repo as valid but surfaces the warning.
+        let result = validate_local_repo(temp_dir.path());
+        assert!(result.is_valid);
+        assert!(result.error_message.is_none());
+        assert!(result.warning_message.is_some());
     }
 
     #[test]

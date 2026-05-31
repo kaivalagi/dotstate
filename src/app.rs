@@ -1057,7 +1057,9 @@ impl App {
                     return Ok(());
                 }
 
-                // Verify git repository can be opened
+                // Verify git repository can be opened. (Experimental SHA-256
+                // repos are confirmed up-front via a popup in the storage setup
+                // screen — see issue #35 — so no warning is needed here.)
                 if let Err(e) = crate::git::GitManager::open_or_init(&repo_path) {
                     self.storage_setup_screen.get_state_mut().error_message =
                         Some(format!("Failed to open repository: {e}"));

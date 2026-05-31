@@ -674,6 +674,9 @@ impl Doctor {
 
             // Check branch status
             self.check_git_branch()?;
+
+            // Check object format (SHA-1 vs experimental SHA-256)
+            self.check_git_object_format()?;
         } else {
             self.add_result(
                 "Repository",
@@ -731,6 +734,35 @@ impl Doctor {
                 }
             }
             _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn check_git_object_format(&mut self) -> Result<()> {
+        let start = Instant::now();
+        let output = Command::new("git")
+            .args(["rev-parse", "--show-object-format"])
+            .current_dir(&self.config.repo_path)
+            .output();
+
+        if let Ok(output) = output {
+            if output.status.success() {
+                let fmt = String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .to_lowercase();
+                if fmt == "sha256" {
+                    self.add_result(
+                        "Repository",
+                        "object_format",
+                        "Repository uses the experimental SHA-256 object format",
+                        ValidationStatus::Warning,
+                        None,
+                        Some(vec![crate::git::SHA256_EXPERIMENTAL_WARNING.to_string()]),
+                        start,
+                    );
+                }
+            }
         }
 
         Ok(())

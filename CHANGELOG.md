@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Git**: Support for repositories using the SHA-256 object format (#35). DotState previously failed to open them with "unknown object format sha256". Enabled via git2 0.21's experimental `unstable-sha256` feature; SHA-256 hashing is routed through thread-safe vendored OpenSSL (`https` feature). When you add a local SHA-256 repo during setup, a confirmation popup warns that support is experimental and asks you to confirm before proceeding, and `doctor` flags already-configured SHA-256 repos.
+
+### Changed
+
+- **Dependencies**: Upgraded `git2` from 0.20 to 0.21. Adapted to its API changes (`Remote::url`, `Reference::name`, and `StatusEntry::path` now return `Result` instead of `Option`).
+
 ---
 
 ## [0.3.4] - 2026-05-17
