@@ -10,7 +10,12 @@ jobs:
   test:
     name: Test Suite
     runs-on: ${{ matrix.os }}
+    # Nightly is informational only: a new nightly clippy lint (pedantic group)
+    # must not gate releases. See KNOW-88. fail-fast: false keeps stable/beta
+    # running even if nightly fails.
+    continue-on-error: ${{ matrix.rust == 'nightly' }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
         rust: [stable, beta]

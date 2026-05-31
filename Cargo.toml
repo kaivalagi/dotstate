@@ -120,6 +120,8 @@ implicit_hasher = "allow"
 case_sensitive_file_extension_comparisons = "allow"
 # Allow async without await (trait compatibility)
 unused_async = "allow"
+# Allow async step-handlers without await (uniform signature; new in clippy 0.1.98 nightly)
+unused_async_trait_impl = "allow"
 # Allow redundant else blocks (sometimes clearer)
 redundant_else = "allow"
 # Allow structs with multiple bools (UI state often needs this)

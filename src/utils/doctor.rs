@@ -476,7 +476,7 @@ impl Doctor {
                     ValidationStatus::Warning,
                     None,
                     Some(vec![
-                        format!("Run 'dotstate upgrade' to update"),
+                        "Run 'dotstate upgrade' to update".to_string(),
                         format!("Release notes: {}", update_info.release_url),
                     ]),
                     start,
