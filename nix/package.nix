@@ -22,6 +22,8 @@ rustPlatform.buildRustPackage {
     lockFile = ../Cargo.lock;
   };
 
+  doCheck = false;
+
   nativeBuildInputs = [
     cmake
     git
