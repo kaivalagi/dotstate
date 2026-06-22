@@ -2,6 +2,7 @@
   lib,
   rustPlatform,
   cmake,
+  git,
   perl,
   openssl,
   pkg-config,
@@ -23,6 +24,7 @@ rustPlatform.buildRustPackage {
 
   nativeBuildInputs = [
     cmake
+    git
     perl
     pkg-config
   ];
