@@ -22,7 +22,7 @@ rustPlatform.buildRustPackage {
     lockFile = ../Cargo.lock;
   };
 
-  doCheck = false;
+  doCheck = true;
 
   nativeBuildInputs = [
     cmake
