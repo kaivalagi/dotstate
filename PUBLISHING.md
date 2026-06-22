@@ -7,6 +7,7 @@ This document outlines the steps to publish DotState to various package managers
 - [ ] Update version in `Cargo.toml`
 - [ ] Update `CHANGELOG.md` with release notes
 - [ ] Update `README.md` if needed
+- [ ] Update Nix lockfiles: `./nix/rebuild.sh`
 - [ ] Run full test suite: `cargo test`
 - [ ] Run clippy: `cargo clippy -- -D warnings`
 - [ ] Check formatting: `cargo fmt -- --check`
@@ -63,6 +64,70 @@ Note: Publishing to crates.io is permanent. Make sure everything is correct!
    ```bash
    brew install serkanyersen/dotstate/dotstate
    ```
+
+## Publishing to Nix
+
+The project provides a Nix flake at the repository root. No separate publishing step is needed — users consume it directly from GitHub:
+
+```bash
+# Run directly
+nix run github:serkanyersen/dotstate
+
+# Build locally
+nix build github:serkanyersen/dotstate
+
+# Install via nix profile
+nix profile install github:serkanyersen/dotstate
+```
+
+### Flake Input (for nixos or home-manager configs)
+
+```nix
+inputs = {
+  dotstate.url = "github:serkanyersen/dotstate";
+};
+```
+
+### Using the Overlay
+
+```nix
+nixpkgs.overlays = [ inputs.dotstate.overlays.default ];
+environment.systemPackages = [ pkgs.dotstate ];
+```
+
+### Using the Home Manager Module
+
+```nix
+imports = [ inputs.dotstate.homeModules.default ];
+programs.dotstate.enable = true;
+programs.dotstate.settings = {
+  repo_mode = "Local";
+  repo_path = "~/dotfiles";
+};
+```
+
+### Keeping Up to Date
+
+After pushing a new version tag, update `Cargo.lock` and `flake.lock`:
+
+```bash
+./nix/rebuild.sh
+```
+
+Then commit the updated lockfiles and tag:
+
+```bash
+git add Cargo.lock flake.lock
+git commit -m "chore: update lockfiles for v0.1.0"
+git tag -a v0.1.0 -m "Release v0.1.0"
+git push origin main --tags
+```
+
+### Non-Flake Usage
+
+```bash
+nix-build default.nix
+```
 
 ## GitHub Releases
 
