@@ -80,7 +80,18 @@ nix build github:serkanyersen/dotstate
 nix profile install github:serkanyersen/dotstate
 ```
 
-### Flake Input (for nixos or home-manager configs)
+### Installing Nix on Any Linux Distro
+
+Nix is **not tied to NixOS** — it works as a package manager on any Linux distribution (Ubuntu, Arch, Fedora, etc.):
+
+1. Install Nix: `sh <(curl -L https://nixos.org/nix/install)`
+2. Enable flakes in `~/.config/nix/nix.conf`:
+   ```
+   experimental-features = nix-command flakes
+   ```
+3. Run the flake: `nix run github:serkanyersen/dotstate`
+
+### Flake Input
 
 ```nix
 inputs = {
@@ -106,28 +117,28 @@ programs.dotstate.settings = {
 };
 ```
 
-### Keeping Up to Date
-
-After pushing a new version tag, update `Cargo.lock` and `flake.lock`:
-
-```bash
-./nix/rebuild.sh
-```
-
-Then commit the updated lockfiles and tag:
-
-```bash
-git add Cargo.lock flake.lock
-git commit -m "chore: update lockfiles for v0.1.0"
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin main --tags
-```
-
 ### Non-Flake Usage
 
 ```bash
 nix-build default.nix
 ```
+
+### Updating Lockfiles (for maintainers)
+
+After source changes, run this from the repo root to regenerate `Cargo.lock` and `flake.lock`:
+
+```bash
+./nix/rebuild.sh
+```
+
+Then commit:
+
+```bash
+git add Cargo.lock flake.lock
+git commit -m "chore: update lockfiles"
+```
+
+> **Non-NixOS maintainers can still run this** — just install Nix on your distro first (see "Installing Nix on Any Linux Distro" above). The rebuild script only needs `cargo generate-lockfile`, `nix flake update`, and `nix build` — all available once Nix is installed.
 
 ## GitHub Releases
 
